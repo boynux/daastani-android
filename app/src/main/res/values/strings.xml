@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">daastani</string>
+    <string name="action_settings">Settings</string>
+    <string name="title_activity_record">RecordActivity</string>
+    <string name="recordButton">Record</string>
+    <string name="playButton">Play</string>
+    <string name="facebook_app_id">361399661067354</string>
+    <string name="fb_login_protocol_scheme">fb361399661067354</string>
+    <string name="saveButton">Save</string>
+</resources>
