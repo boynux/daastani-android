@@ -1,144 +1,82 @@
 package com.boynux.daastani
 
-import android.Manifest
-import android.content.Context
+import android.app.Activity
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.media.MediaPlayer
-import android.media.MediaRecorder
 import android.os.Bundle
 import android.support.design.widget.Snackbar
-import android.support.v4.app.ActivityCompat
 import android.support.v7.app.AppCompatActivity
+import android.support.v7.widget.CardView
+import android.support.v7.widget.LinearLayoutManager
+import android.support.v7.widget.RecyclerView
 import android.util.Log
-import android.view.View.OnClickListener
+import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
+import android.widget.TextView
+import com.amazonaws.mobile.auth.core.IdentityManager
+import com.amazonaws.mobile.client.AWSMobileClient
+import com.amazonaws.mobile.client.AWSStartupHandler
+import com.amazonaws.mobile.client.AWSStartupResult
+import com.amazonaws.mobileconnectors.dynamodbv2.dynamodbmapper.*
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient
 import kotlinx.android.synthetic.main.activity_main.*
-import java.io.IOException
+import org.w3c.dom.Text
+import kotlin.concurrent.thread
 
 private const val LOG_TAG = "AudioRecordTest"
-private const val REQUEST_RECORD_AUDIO_PERMISSION = 200
 
+interface DynamoDbInitializerListerner {
+    fun OnInstanceReady(client: DynamoDBMapper)
+}
 
-class MainActivity : AppCompatActivity() {
+@DynamoDBTable(tableName = "daastani")
+class UserDO {
+    @DynamoDBHashKey(attributeName = "userid")
+    @DynamoDBAttribute(attributeName = "userid")
+    var userid: String? = null
 
-    private var mFileName: String = ""
+    @DynamoDBRangeKey(attributeName = "device_id")
+    @DynamoDBAttribute(attributeName = "device_id")
+    var deviceId: String? = null
+}
 
-    private var mRecordButton: RecordButton? = null
-    private var mRecorder: MediaRecorder? = null
+class MainActivity : AppCompatActivity(), DynamoDbInitializerListerner {
+    private lateinit var recyclerView: RecyclerView
+    private lateinit var viewAdapter: MyAdapter
+    private lateinit var viewManager: RecyclerView.LayoutManager
 
-    private var mPlayButton: PlayButton? = null
-    private var mPlayer: MediaPlayer? = null
+    override fun OnInstanceReady(client: DynamoDBMapper) {
+        ddbMapper = client
 
-    // Requesting permission to RECORD_AUDIO
-    private var permissionToRecordAccepted = false
-    private var permissions: Array<String> = arrayOf(Manifest.permission.RECORD_AUDIO)
-
-    override fun onRequestPermissionsResult(
-            requestCode: Int,
-            permissions: Array<String>,
-            grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        permissionToRecordAccepted = if (requestCode == REQUEST_RECORD_AUDIO_PERMISSION) {
-            grantResults[0] == PackageManager.PERMISSION_GRANTED
-        } else {
-            false
-        }
-        if (!permissionToRecordAccepted) finish()
+        readBooks()
     }
 
-    private fun onRecord(start: Boolean) = if (start) {
-        startRecording()
-    } else {
-        stopRecording()
-    }
+    private var ddbMapper: DynamoDBMapper? = null
 
-    private fun onPlay(start: Boolean) = if (start) {
-        startPlaying()
-    } else {
-        stopPlaying()
-    }
+    private fun readBooks() {
+        val userId = IdentityManager.getDefaultIdentityManager().cachedUserID
 
-    private fun startPlaying() {
-        mPlayer = MediaPlayer().apply {
-            try {
-                setDataSource(mFileName)
-                prepare()
-                start()
-            } catch (e: IOException) {
-                Log.e(LOG_TAG, "prepare() failed")
+        thread(start = true) {
+            val expression = DynamoDBQueryExpression<UserDO>()
+
+            expression.hashKeyValues = UserDO().apply {
+                userid = userId
+            }
+
+            val devicesList = ddbMapper?.query(UserDO::class.java, expression)
+            var devices = mutableListOf<UserDO>()
+
+            devicesList?.forEach {
+                devices.add(it)
+                Log.d(LOG_TAG, "Books Item: UserId: ${it.userid}, DeviceId: ${it.deviceId}")
+            }
+
+            runOnUiThread {
+                viewAdapter.updateDataSet(devices)
             }
         }
     }
 
-    private fun stopPlaying() {
-        mPlayer?.release()
-        mPlayer = null
-    }
-
-    private fun startRecording() {
-        mRecorder = MediaRecorder().apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
-            setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
-            setOutputFile(mFileName)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
-
-            try {
-                prepare()
-            } catch (e: IOException) {
-                Log.e(LOG_TAG, "prepare() failed")
-            }
-
-            start()
-        }
-    }
-
-    private fun stopRecording() {
-        mRecorder?.apply {
-            stop()
-            release()
-        }
-        mRecorder = null
-    }
-
-    internal inner class RecordButton(ctx: Context) : Button(ctx) {
-
-        var mStartRecording = true
-
-        var clicker: OnClickListener = OnClickListener {
-            onRecord(mStartRecording)
-            text = when (mStartRecording) {
-                true -> "Stop recording"
-                false -> "Start recording"
-            }
-            mStartRecording = !mStartRecording
-        }
-
-        init {
-            text = "Start recording"
-            setOnClickListener(clicker)
-        }
-    }
-
-    internal inner class PlayButton(ctx: Context) : Button(ctx) {
-        var mStartPlaying = true
-        var clicker: OnClickListener = OnClickListener {
-            onPlay(mStartPlaying)
-            text = when (mStartPlaying) {
-                true -> "Stop playing"
-                false -> "Start playing"
-            }
-            mStartPlaying = !mStartPlaying
-        }
-
-        init {
-            text = "Start playing"
-            setOnClickListener(clicker)
-        }
-    }
 
     override fun onCreate(icicle: Bundle?) {
         super.onCreate(icicle)
@@ -146,73 +84,93 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         setSupportActionBar(toolbar)
 
-        fab.setOnClickListener { view ->
-            Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                    .setAction("Action", null).show()
+        viewManager = LinearLayoutManager(this)
+        viewAdapter = MyAdapter(mutableListOf<UserDO>(), object: MyAdapter.OnItemClickListener {
+            override fun onItemClick(item: UserDO) {
+                Log.e(LOG_TAG, "Device id is: ${item.deviceId}")
 
-            val recordInent = Intent(this, RecordActivity::class.java)
-            startActivity(recordInent)
+                val deviceActivity = Intent(applicationContext, DeviceActivity::class.java)
+                deviceActivity.putExtra("device_id", item.deviceId)
+                startActivity(deviceActivity)
+            }
+
+        })
+
+        recyclerView = findViewById<RecyclerView>(R.id.device_list).apply {
+            // use this setting to improve performance if you know that changes
+            // in content do not change the layout size of the RecyclerView
+            setHasFixedSize(true)
+
+            // use a linear layout manager
+            layoutManager = viewManager
+
+            // specify an viewAdapter (see also next example)
+            adapter = viewAdapter
+
         }
 
-        // Record to the external cache directory for visibility
-        mFileName = "${externalCacheDir.absolutePath}/audiorecordtest.3gp"
+        AWSMobileClient.getInstance().initialize(this, object : AWSStartupHandler {
+            override fun onComplete(awsStartupResult: AWSStartupResult) {
+                val ddbClient = AmazonDynamoDBClient(AWSMobileClient.getInstance().credentialsProvider)
+                val ddbMapper = DynamoDBMapper.builder()
+                        .dynamoDBClient(ddbClient)
+                        .awsConfiguration(AWSMobileClient.getInstance().configuration)
+                        .build()
 
-        ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION)
+                OnInstanceReady(ddbMapper)
+            }
+        }).execute()
 
-        mRecordButton = RecordButton(this)
-        mPlayButton = PlayButton(this)
-        LinearLayout(this).apply {
-            addView(mRecordButton,
-                    LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            0f))
-            addView(mPlayButton,
-                    LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            ViewGroup.LayoutParams.WRAP_CONTENT,
-                            0f))
-        }
-        // setContentView(ll)
-    }
-
-    override fun onStop() {
-        super.onStop()
-        mRecorder?.release()
-        mRecorder = null
-        mPlayer?.release()
-        mPlayer = null
     }
 }
 
-/*
-class MainActivity : AppCompatActivity() {
+class MyAdapter(private var myDataset: MutableList<UserDO>, private val listener: OnItemClickListener) :
+        RecyclerView.Adapter<MyAdapter.MyViewHolder>() {
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        setSupportActionBar(toolbar)
+    interface OnItemClickListener {
+        fun onItemClick(item: UserDO)
+    }
 
-        fab.setOnClickListener { view ->
-            Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
-                    .setAction("Action", null).show()
+    // Provide a reference to the views for each data item
+    // Complex data items may need more than one view per item, and
+    // you provide access to all the views for a data item in a view holder.
+    // Each data item is just a string in this case that is shown in a TextView.
+    class MyViewHolder(val card: CardView) : RecyclerView.ViewHolder(card) {
+        fun bind(item: UserDO, listener: OnItemClickListener ) {
+            card.setOnClickListener(object: View.OnClickListener {
+                override fun onClick(v: View) {
+                    listener.onItemClick(item);
+                }
+            });
         }
     }
 
-    override fun onCreateOptionsMenu(menu: Menu): Boolean {
-        // Inflate the menu; this adds items to the action bar if it is present.
-        menuInflater.inflate(R.menu.menu_main, menu)
-        return true
+
+    // Create new views (invoked by the layout manager)
+    override fun onCreateViewHolder(parent: ViewGroup,
+                                    viewType: Int): MyAdapter.MyViewHolder {
+        // create a new view
+        val textView = LayoutInflater.from(parent.context)
+                .inflate(R.layout.device_card, parent, false) as CardView
+        // set the view's size, margins, paddings and layout parameters
+
+        return MyViewHolder(textView)
     }
 
-    override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        // Handle action bar item clicks here. The action bar will
-        // automatically handle clicks on the Home/Up button, so long
-        // as you specify a parent activity in AndroidManifest.xml.
-        return when (item.itemId) {
-            R.id.action_settings -> true
-            else -> super.onOptionsItemSelected(item)
-        }
+    // Replace the contents of a view (invoked by the layout manager)
+    override fun onBindViewHolder(holder: MyViewHolder, position: Int) {
+        // - get element from your dataset at this position
+        // - replace the contents of the view with that element
+        holder.card.findViewById<TextView>(R.id.device_id).text = myDataset[position].deviceId
+        holder.bind(myDataset[position], listener)
+    }
+
+    // Return the size of your dataset (invoked by the layout manager)
+    override fun getItemCount() = myDataset.size
+
+    fun updateDataSet(set: List<UserDO>) {
+        myDataset = set.toMutableList()
+        notifyDataSetChanged()
+
     }
 }
-*/

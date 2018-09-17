@@ -6,17 +6,12 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
 import android.support.design.widget.Snackbar
+import android.support.v4.app.ActivityCompat
 import android.support.v7.app.AppCompatActivity
 import android.util.Log
 import android.widget.CompoundButton
-import com.amazonaws.auth.AWSBasicCognitoIdentityProvider
-import com.amazonaws.auth.AWSCognitoIdentityProvider
 import com.amazonaws.mobile.auth.core.IdentityManager
-import com.amazonaws.mobile.auth.core.IdentityProvider
-import com.amazonaws.mobile.auth.core.signin.SignInProvider
 import com.amazonaws.mobile.client.AWSMobileClient
-import com.amazonaws.mobileconnectors.cognitoidentityprovider.CognitoUser
-import com.amazonaws.mobileconnectors.cognitoidentityprovider.CognitoUserDetails
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferListener
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferState
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferUtility
@@ -26,8 +21,6 @@ import kotlinx.android.synthetic.main.activity_record.*
 import kotlinx.android.synthetic.main.content_record.*
 import java.io.File
 import java.io.IOException
-import com.amazonaws.mobileconnectors.cognitoidentityprovider.CognitoUserPool
-import com.amazonaws.mobileconnectors.cognitoidentityprovider.handlers.GetDetailsHandler
 
 
 private const val LOG_TAG = "AudioRecordTest"
@@ -158,7 +151,7 @@ class RecordActivity : AppCompatActivity() {
         setContentView(R.layout.activity_record)
         setSupportActionBar(toolbar)
 
-        playButton.text = "Start playing"
+        playItemButton.text = "Start playing"
 
         recordButton.setOnCheckedChangeListener { _: CompoundButton, b: Boolean ->
             if (b) {
@@ -168,9 +161,9 @@ class RecordActivity : AppCompatActivity() {
             }
         }
 
-        playButton.setOnClickListener {
+        playItemButton.setOnClickListener {
             onPlay(mStartPlaying)
-            playButton.text = when (mStartPlaying) {
+            playItemButton.text = when (mStartPlaying) {
                 true -> "Stop playing"
                 false -> "Start playing"
             }
@@ -180,6 +173,8 @@ class RecordActivity : AppCompatActivity() {
         saveButton.setOnClickListener {
             uploadWithTransferUtility("audiorecordtest.3gp", File(mFileName))
         }
+
+        ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION)
     }
 
 }
