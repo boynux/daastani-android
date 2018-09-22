@@ -5,22 +5,44 @@ import android.content.pm.PackageManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Bundle
+import android.support.annotation.UiThread
 import android.support.design.widget.Snackbar
 import android.support.v4.app.ActivityCompat
 import android.support.v7.app.AppCompatActivity
 import android.util.Log
 import android.widget.CompoundButton
+import android.widget.Toast
 import com.amazonaws.mobile.auth.core.IdentityManager
 import com.amazonaws.mobile.client.AWSMobileClient
+import com.amazonaws.mobile.client.AWSStartupHandler
+import com.amazonaws.mobile.client.AWSStartupResult
+import com.amazonaws.mobileconnectors.iot.AWSIotKeystoreHelper
+import com.amazonaws.mobileconnectors.iot.AWSIotMqttClientStatusCallback
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferListener
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferState
 import com.amazonaws.mobileconnectors.s3.transferutility.TransferUtility
+import com.amazonaws.regions.Regions
 import com.amazonaws.services.s3.AmazonS3Client
 
 import kotlinx.android.synthetic.main.activity_record.*
 import kotlinx.android.synthetic.main.content_record.*
 import java.io.File
 import java.io.IOException
+import java.util.*
+import kotlin.coroutines.experimental.buildSequence
+import com.amazonaws.mobileconnectors.iot.AWSIotMqttManager
+import com.amazonaws.mobileconnectors.iot.AWSIotMqttQos
+import com.amazonaws.regions.Region
+import com.amazonaws.services.cognitoidentity.AmazonCognitoIdentity
+import com.amazonaws.services.cognitoidentity.AmazonCognitoIdentityClient
+import com.amazonaws.services.cognitoidentity.model.GetIdRequest
+import com.amazonaws.services.iot.AWSIotClient
+import com.amazonaws.services.iot.model.AttachPolicyRequest
+import com.amazonaws.services.iot.model.AttachPrincipalPolicyRequest
+import com.amazonaws.services.iot.model.AttachThingPrincipalRequest
+import com.amazonaws.services.iot.model.CreateKeysAndCertificateRequest
+import java.security.KeyStore
+import kotlin.concurrent.thread
 
 
 private const val LOG_TAG = "AudioRecordTest"
@@ -32,6 +54,7 @@ class RecordActivity : AppCompatActivity() {
     private var permissions: Array<String> = arrayOf(Manifest.permission.RECORD_AUDIO)
 
     private var mFileName: String = ""
+    private var mLocalFilePath: String = ""
     private var mRecorder: MediaRecorder? = null
     private var mPlayer: MediaPlayer? = null
 
@@ -55,7 +78,7 @@ class RecordActivity : AppCompatActivity() {
         mRecorder = MediaRecorder().apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
-            setOutputFile(mFileName)
+            setOutputFile(mLocalFilePath)
             setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
 
             try {
@@ -79,7 +102,7 @@ class RecordActivity : AppCompatActivity() {
     private fun startPlaying() {
         mPlayer = MediaPlayer().apply {
             try {
-                setDataSource(mFileName)
+                setDataSource(mLocalFilePath)
                 prepare()
                 start()
             } catch (e: IOException) {
@@ -141,16 +164,25 @@ class RecordActivity : AppCompatActivity() {
         }
     }
 
+    fun generateFileSuffix(length: Int = 4): String {
+        return buildSequence { val r = Random(); while(true) yield(r.nextInt(24)) }
+                .take(length)
+                .map{(it + 65).toChar()}
+                .joinToString("")
+
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        mFileName = "${externalCacheDir.absolutePath}/audiorecordtest.3gp"
+        mFileName = "audiorecordtest-${generateFileSuffix()}.3gp"
+        mLocalFilePath = "${externalCacheDir.absolutePath}/${mFileName}"
 
         AWSMobileClient.getInstance().initialize(this).execute()
 
         setContentView(R.layout.activity_record)
         setSupportActionBar(toolbar)
 
+        filename_text.setText(mFileName)
         playItemButton.text = "Start playing"
 
         recordButton.setOnCheckedChangeListener { _: CompoundButton, b: Boolean ->
@@ -171,7 +203,7 @@ class RecordActivity : AppCompatActivity() {
         }
 
         saveButton.setOnClickListener {
-            uploadWithTransferUtility("audiorecordtest.3gp", File(mFileName))
+            uploadWithTransferUtility(mFileName, File(mLocalFilePath))
         }
 
         ActivityCompat.requestPermissions(this, permissions, REQUEST_RECORD_AUDIO_PERMISSION)

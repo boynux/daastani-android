@@ -109,17 +109,15 @@ class MainActivity : AppCompatActivity(), DynamoDbInitializerListerner {
 
         }
 
-        AWSMobileClient.getInstance().initialize(this, object : AWSStartupHandler {
-            override fun onComplete(awsStartupResult: AWSStartupResult) {
-                val ddbClient = AmazonDynamoDBClient(AWSMobileClient.getInstance().credentialsProvider)
-                val ddbMapper = DynamoDBMapper.builder()
-                        .dynamoDBClient(ddbClient)
-                        .awsConfiguration(AWSMobileClient.getInstance().configuration)
-                        .build()
 
-                OnInstanceReady(ddbMapper)
-            }
-        }).execute()
+        val ddbClient = AmazonDynamoDBClient(AWSMobileClient.getInstance().credentialsProvider)
+        val ddbMapper = DynamoDBMapper.builder()
+                .dynamoDBClient(ddbClient)
+                .awsConfiguration(AWSMobileClient.getInstance().configuration)
+                .build()
+
+        OnInstanceReady(ddbMapper)
+
 
     }
 }
