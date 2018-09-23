@@ -109,7 +109,6 @@ class MainActivity : AppCompatActivity(), DynamoDbInitializerListerner {
 
         }
 
-
         val ddbClient = AmazonDynamoDBClient(AWSMobileClient.getInstance().credentialsProvider)
         val ddbMapper = DynamoDBMapper.builder()
                 .dynamoDBClient(ddbClient)

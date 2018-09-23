@@ -46,44 +46,15 @@ class DeviceActivity : AppCompatActivity() {
     private lateinit var s3Client: AmazonS3Client
     private lateinit var mPlayer: MediaPlayer
 
-    // Region of AWS IoT
-    private val MY_REGION = Region.getRegion(Regions.EU_CENTRAL_1)
-    // IoT endpoint
-    // AWS Iot CLI describe-endpoint call returns: XXXXXXXXXX.iot.<region>.amazonaws.com
-    private lateinit var CUSTOMER_SPECIFIC_ENDPOINT: String
+    private lateinit var mqttManager: MQTTManager
 
-    // Name of the AWS IoT policy to attach to a newly created certificate
-    private lateinit var AWS_IOT_POLICY_NAME: String
-
-    // Filename of KeyStore file on the filesystem
-    private lateinit var KEYSTORE_NAME: String
-    // Password for the private key in the KeyStore
-    private lateinit var KEYSTORE_PASSWORD: String
-    // Certificate and key aliases in the KeyStore
-    private val CERTIFICATE_ID = "default"
-
-    private lateinit var clientKeyStore: KeyStore
-    private lateinit var iotManager: AWSIotMqttManager
-
-    private fun init() {
-        val config = AWSConfiguration(this@DeviceActivity)
-
-        val jsonObject = config.optJsonObject("IoT")
-        if (jsonObject == null) {
-            Log.e(LOG_TAG, "Could not load IoT config from aws configuration")
-        }
-
-        CUSTOMER_SPECIFIC_ENDPOINT = jsonObject.getString("Endpoint")
-        AWS_IOT_POLICY_NAME = jsonObject.getString("Policy")
-        KEYSTORE_NAME = jsonObject.getString("KeystoreName")
-        KEYSTORE_PASSWORD = jsonObject.getString("KeystorePassword")
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_device)
 
-        init()
+        mqttManager = MQTTManager(this)
+        // init()
 
         mPlayer = MediaPlayer()
 
@@ -126,7 +97,26 @@ class DeviceActivity : AppCompatActivity() {
         val s3Client = AmazonS3Client(AWSMobileClient.getInstance().credentialsProvider)
         onS3ClientReady(s3Client)
 
-        sendMessageToDevice()
+        // sendMessageToDevice()
+        thread {
+            mqttManager.connect(object : MQTTManager.ConnectHandler() {
+                override fun onConnected() {
+                    runOnUiThread {
+                        Toast.makeText(this@DeviceActivity, "Connted to device!", Toast.LENGTH_SHORT).show()
+                    }
+
+                    // iotManager.publishString("{\"msg\": \"test string published!\"}", "test topic", AWSIotMqttQos.QOS1);
+                }
+
+                override fun onDisconnected() {
+                    TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+                }
+
+                override fun onError(e: Throwable?) {
+                    TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+                }
+            })
+        }
     }
 
     private fun startPlaying(filename: String) {
@@ -162,114 +152,6 @@ class DeviceActivity : AppCompatActivity() {
             val items = s3Client.listObjects("daastani-assets", "private/$userId/")
             runOnUiThread {
                 viewAdapter.updateDataSet(items.objectSummaries)
-            }
-        }
-    }
-
-    fun sendMessageToDevice() {
-        Log.e(LOG_TAG, "Connecting to IoT Message Q ...")
-        val clientId = UUID.randomUUID().toString()
-        val credentialsProvider = AWSMobileClient.getInstance().credentialsProvider
-
-        Log.e(LOG_TAG, "Identity ID: ${clientId}")
-
-        // IoT Client (for creation of certificate if needed)
-        val mIotAndroidClient = AWSIotClient(credentialsProvider);
-        mIotAndroidClient.setRegion(MY_REGION);
-
-        val keystorePath = getFilesDir().getPath();
-        val keystoreName = KEYSTORE_NAME;
-        val keystorePassword = KEYSTORE_PASSWORD;
-        val certificateId = CERTIFICATE_ID;
-
-
-        // To load cert/key from keystore on filesystem
-        try {
-            if (AWSIotKeystoreHelper.isKeystorePresent(keystorePath, keystoreName)) {
-                if (AWSIotKeystoreHelper.keystoreContainsAlias(certificateId, keystorePath,
-                                keystoreName, keystorePassword)) {
-                    Log.i(LOG_TAG, "Certificate " + certificateId
-                            + " found in keystore - using for MQTT.");
-                    // load keystore from file into memory to pass on connection
-                    clientKeyStore = AWSIotKeystoreHelper.getIotKeystore(certificateId,
-                            keystorePath, keystoreName, keystorePassword);
-
-                    iotManager = AWSIotMqttManager(clientId, CUSTOMER_SPECIFIC_ENDPOINT)
-                    iotManager.isAutoReconnect = false
-                    iotManager.keepAlive = 0
-
-                    iotManager.connect(clientKeyStore, object : AWSIotMqttClientStatusCallback {
-                        override fun onStatusChanged(status: AWSIotMqttClientStatusCallback.AWSIotMqttClientStatus?, throwable: Throwable?) {
-                            Log.d(LOG_TAG, "Status = $status")
-
-                            if (throwable != null) {
-                                throwable.printStackTrace()
-                            }
-
-                            if (status == AWSIotMqttClientStatusCallback.AWSIotMqttClientStatus.Connected) {
-                                runOnUiThread {
-                                    Toast.makeText(this@DeviceActivity, "Connted to device!", Toast.LENGTH_SHORT).show()
-                                }
-
-                                iotManager.publishString("{\"msg\": \"test string published!\"}", "test topic", AWSIotMqttQos.QOS1);
-                            }
-                        }
-                    })
-                } else {
-                    Log.i(LOG_TAG, "Key/cert " + certificateId + " not found in keystore.");
-                }
-            } else {
-                Log.i(LOG_TAG, "Keystore " + keystorePath + "/" + keystoreName + " not found.");
-            }
-        } catch (e: java.lang.Exception) {
-            Log.e(LOG_TAG, "An error occurred retrieving cert/key from keystore.", e);
-        }
-
-        if (clientKeyStore == null) {
-            Log.i(LOG_TAG, "Cert/key was not found in keystore - creating new key and certificate.");
-
-            thread {
-                try {
-                    // Create a new private key and certificate. This call
-                    // creates both on the server and returns them to the
-                    // device.
-                    val createKeysAndCertificateRequest =
-                            CreateKeysAndCertificateRequest();
-                    createKeysAndCertificateRequest.setSetAsActive(true);
-                    val createKeysAndCertificateResult =
-                            mIotAndroidClient.createKeysAndCertificate(createKeysAndCertificateRequest);
-                    Log.i(LOG_TAG,
-                            "Cert ID: " +
-                                    createKeysAndCertificateResult.getCertificateId() +
-                                    " created.");
-
-                    // store in keystore for use in MQTT client
-                    // saved as alias "default" so a new certificate isn't
-                    // generated each run of this application
-                    AWSIotKeystoreHelper.saveCertificateAndPrivateKey(certificateId,
-                            createKeysAndCertificateResult.getCertificatePem(),
-                            createKeysAndCertificateResult.getKeyPair().getPrivateKey(),
-                            keystorePath, keystoreName, keystorePassword);
-
-                    // load keystore from file into memory to pass on
-                    // connection
-                    clientKeyStore = AWSIotKeystoreHelper.getIotKeystore(certificateId,
-                            keystorePath, keystoreName, keystorePassword);
-
-                    // Attach a policy to the newly created certificate.
-                    // This flow assumes the policy was already created in
-                    // AWS IoT and we are now just attaching it to the
-                    // certificate.
-                    val policyAttachRequest = AttachPrincipalPolicyRequest();
-                    policyAttachRequest.setPolicyName(AWS_IOT_POLICY_NAME);
-                    policyAttachRequest.setPrincipal(createKeysAndCertificateResult
-                            .getCertificateArn());
-                    mIotAndroidClient.attachPrincipalPolicy(policyAttachRequest);
-                } catch (e: Exception) {
-                    Log.e(LOG_TAG,
-                            "Exception occurred when generating new private key and certificate.",
-                            e);
-                }
             }
         }
     }

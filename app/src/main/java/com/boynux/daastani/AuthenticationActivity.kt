@@ -39,7 +39,7 @@ class AuthenticationActivity: AppCompatActivity() {
             signInManager.refreshCredentialsWithProvider(this@AuthenticationActivity,
                     provider,  object: SignInProviderResultHandler {
                 override fun onSuccess(provider: IdentityProvider?) {
-                    // startActivity(Intent(applicationContext, MainActivity::class.java))
+                    startActivity(Intent(applicationContext, MainActivity::class.java))
                 }
 
                 override fun onCancel(provider: IdentityProvider?) {
